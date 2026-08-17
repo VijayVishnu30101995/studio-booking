@@ -1,6 +1,8 @@
 from datetime import timedelta
 
-from django.test import TestCase
+from concurrent.futures import ThreadPoolExecutor
+from django.db import close_old_connections
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -18,7 +20,7 @@ from apps.credits.services import (
 )
 from apps.studios.models import Studio
 
-class BookingServiceTests(TestCase):
+class BookingServiceTests(TransactionTestCase):
     def setUp(self) -> None:
         self.member = User.objects.create_user(
             username="member",
@@ -187,3 +189,77 @@ class BookingServiceTests(TestCase):
         )
 
         self.assertEqual(balance, 5)
+
+    def test_concurrent_booking_attempts_do_not_exceed_class_capacity(self) -> None:
+        concurrent_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=4),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        another_member = User.objects.create_user(
+            username="concurrent-member",
+            email="concurrent@example.com",
+            password="password123",
+        )
+
+        CreditService.grant_pack(
+            member=another_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        def attempt_booking(member: User, idempotency_key: str):
+            close_old_connections()
+
+            try:
+                return BookingService.book(
+                    member=member,
+                    fitness_class_id=concurrent_class.id,
+                    idempotency_key=idempotency_key,
+                )
+            except ClassFullError as exc:
+                return exc
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(
+                    attempt_booking,
+                    self.member,
+                    "concurrent-booking-001",
+                ),
+                executor.submit(
+                    attempt_booking,
+                    another_member,
+                    "concurrent-booking-002",
+                ),
+            ]
+
+            results = [future.result() for future in futures]
+
+        successful_bookings = [
+            result
+            for result in results
+            if isinstance(result, Booking)
+        ]
+
+        failed_bookings = [
+            result
+            for result in results
+            if isinstance(result, ClassFullError)
+        ]
+
+        self.assertEqual(len(successful_bookings), 1)
+        self.assertEqual(len(failed_bookings), 1)
+
+        confirmed_booking_count = Booking.objects.filter(
+            fitness_class=concurrent_class,
+            status=BookingStatus.CONFIRMED,
+        ).count()
+
+        self.assertEqual(confirmed_booking_count, 1)
