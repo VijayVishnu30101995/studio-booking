@@ -1,5 +1,9 @@
 import logging
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
 from django.db import transaction
+from django.utils import timezone
 
 from apps.bookings.models import Booking, BookingStatus
 from apps.classes.models import FitnessClass
@@ -11,8 +15,13 @@ logger = logging.getLogger(__name__)
 class ClassFullError(Exception):
     """Raised when a fitness class has no available spots."""
 
+
 class DuplicateBookingError(Exception):
     """Raised when a member already has a confirmed booking."""
+
+
+class BookingAlreadyCancelledError(Exception):
+    """Raised when an already cancelled booking is cancelled again."""
 
 class BookingService:
     @staticmethod
@@ -111,6 +120,99 @@ class BookingService:
 
         logger.info(
             "Booking completed successfully: booking_id=%s",
+            booking.id,
+        )
+
+        return booking
+
+
+class CancellationService:
+    @staticmethod
+    @transaction.atomic
+    def cancel(*, booking_id: int) -> Booking:
+        logger.info(
+            "Cancellation request started: booking_id=%s",
+            booking_id,
+        )
+
+        booking = (
+            Booking.objects
+            .select_for_update()
+            .select_related("fitness_class__studio")
+            .get(pk=booking_id)
+        )
+
+        logger.info(
+            "Booking locked for cancellation: booking_id=%s",
+            booking.id,
+        )
+
+        if booking.status == BookingStatus.CANCELLED:
+            logger.warning(
+                "Cancellation rejected: booking already cancelled, "
+                "booking_id=%s",
+                booking.id,
+            )
+            raise BookingAlreadyCancelledError(
+                "Booking has already been cancelled."
+            )
+
+        fitness_class = booking.fitness_class
+        studio = fitness_class.studio
+
+        studio_timezone = ZoneInfo(studio.timezone)
+
+        class_start_local = fitness_class.start_time.astimezone(
+            studio_timezone
+        )
+
+        cutoff = class_start_local - timedelta(
+            hours=studio.cancellation_cutoff_hours
+        )
+
+        now = timezone.now()
+        now_local = now.astimezone(studio_timezone)
+
+        logger.info(
+            "Cancellation cutoff calculated: "
+            "booking_id=%s, class_start=%s, cutoff=%s, now=%s, timezone=%s",
+            booking.id,
+            class_start_local,
+            cutoff,
+            now_local,
+            studio.timezone,
+        )
+
+        booking.status = BookingStatus.CANCELLED
+        booking.cancelled_at = now
+        booking.save(
+            update_fields=["status", "cancelled_at"],
+        )
+
+        if now_local <= cutoff:
+            CreditService.refund_credits(
+                member=booking.member,
+                booking=booking,
+            )
+
+            logger.info(
+                "Booking cancelled and credits refunded: "
+                "booking_id=%s, member_id=%s, credits=%s",
+                booking.id,
+                booking.member.id,
+                booking.credits_charged,
+            )
+        else:
+            logger.info(
+                "Booking cancelled after cutoff: "
+                "credits forfeited, booking_id=%s, member_id=%s, credits=%s",
+                booking.id,
+                booking.member.id,
+                booking.credits_charged,
+            )
+
+        logger.info(
+            "Cancellation completed successfully: booking_id=%s",
             booking.id,
         )
 
