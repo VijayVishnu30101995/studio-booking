@@ -417,3 +417,188 @@ class BookingServiceTests(TransactionTestCase):
         ).exists()
 
         self.assertTrue(refund_exists)
+
+    def test_cancel_booking_promotes_waitlisted_member(self) -> None:
+        from apps.waitlist.models import WaitlistEntry
+        from apps.waitlist.services import WaitlistService
+
+        full_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        booking = BookingService.book(
+            member=self.member,
+            fitness_class_id=full_class.id,
+            idempotency_key="cancel-waitlist-001",
+        )
+
+        waitlist_member = User.objects.create_user(
+            username="waitlist-member",
+            email="waitlist@example.com",
+            password="password123",
+        )
+
+        CreditService.grant_pack(
+            member=waitlist_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        WaitlistService.join(
+            member=waitlist_member,
+            fitness_class_id=full_class.id,
+        )
+
+        cancelled_booking = CancellationService.cancel(
+            booking_id=booking.id,
+        )
+
+        promoted_booking = Booking.objects.get(
+            member=waitlist_member,
+            fitness_class=full_class,
+            status=BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            cancelled_booking.status,
+            BookingStatus.CANCELLED,
+        )
+
+        self.assertEqual(
+            promoted_booking.credits_charged,
+            5,
+        )
+
+        self.assertFalse(
+            WaitlistEntry.objects.filter(
+                member=waitlist_member,
+                fitness_class=full_class,
+            ).exists()
+        )
+
+        balance = CreditService.get_balance(
+            member=waitlist_member,
+        )
+
+        self.assertEqual(balance, 5)
+    
+    def test_cancel_booking_promotes_next_affordable_waitlist_member(self,) -> None:
+        from apps.waitlist.models import WaitlistEntry
+        from apps.waitlist.services import WaitlistService
+
+        full_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        booking = BookingService.book(
+            member=self.member,
+            fitness_class_id=full_class.id,
+            idempotency_key="cancel-waitlist-002",
+        )
+
+        first_waitlist_member = User.objects.create_user(
+            username="first-waitlist",
+            email="first-waitlist@example.com",
+            password="password123",
+        )
+
+        second_waitlist_member = User.objects.create_user(
+            username="second-waitlist",
+            email="second-waitlist@example.com",
+            password="password123",
+        )
+
+        # First member has no credits.
+        WaitlistService.join(
+            member=first_waitlist_member,
+            fitness_class_id=full_class.id,
+        )
+
+        # Second member can afford the class.
+        CreditService.grant_pack(
+            member=second_waitlist_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        WaitlistService.join(
+            member=second_waitlist_member,
+            fitness_class_id=full_class.id,
+        )
+
+        CancellationService.cancel(
+            booking_id=booking.id,
+        )
+
+        promoted_booking = Booking.objects.get(
+            member=second_waitlist_member,
+            fitness_class=full_class,
+            status=BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            promoted_booking.credits_charged,
+            5,
+        )
+
+        # The first member cannot afford the class,
+        # so they remain at the front of the waitlist.
+        self.assertTrue(
+            WaitlistEntry.objects.filter(
+                member=first_waitlist_member,
+                fitness_class=full_class,
+            ).exists()
+        )
+
+        # The promoted member leaves the waitlist.
+        self.assertFalse(
+            WaitlistEntry.objects.filter(
+                member=second_waitlist_member,
+                fitness_class=full_class,
+            ).exists()
+        )
+
+        balance = CreditService.get_balance(
+            member=second_waitlist_member,
+        )
+
+        self.assertEqual(balance, 5)
+
+    def test_cancel_booking_without_waitlist_does_not_create_booking(self,) -> None:
+        full_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        booking = BookingService.book(
+            member=self.member,
+            fitness_class_id=full_class.id,
+            idempotency_key="cancel-waitlist-003",
+        )
+
+        CancellationService.cancel(
+            booking_id=booking.id,
+        )
+
+        confirmed_booking_count = Booking.objects.filter(
+            fitness_class=full_class,
+            status=BookingStatus.CONFIRMED,
+        ).count()
+
+        self.assertEqual(
+            confirmed_booking_count,
+            0,
+        )

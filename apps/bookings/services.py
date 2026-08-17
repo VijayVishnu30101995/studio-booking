@@ -8,6 +8,7 @@ from django.utils import timezone
 from apps.bookings.models import Booking, BookingStatus
 from apps.classes.models import FitnessClass
 from apps.credits.services import CreditService
+from apps.waitlist.services import WaitlistService
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,6 @@ class BookingService:
 
         return booking
 
-
 class CancellationService:
     @staticmethod
     @transaction.atomic
@@ -211,9 +211,34 @@ class CancellationService:
                 booking.credits_charged,
             )
 
+        promoted_booking = WaitlistService.promote_next(
+            fitness_class_id=fitness_class.id,
+        )
+
+        if promoted_booking:
+            logger.info(
+                "Waitlist member promoted after cancellation: "
+                "cancelled_booking_id=%s, promoted_booking_id=%s, "
+                "class_id=%s, promoted_member_id=%s",
+                booking.id,
+                promoted_booking.id,
+                fitness_class.id,
+                promoted_booking.member.id,
+            )
+        else:
+            logger.info(
+                "No waitlist member promoted after cancellation: "
+                "booking_id=%s, class_id=%s",
+                booking.id,
+                fitness_class.id,
+            )
+
         logger.info(
             "Cancellation completed successfully: booking_id=%s",
             booking.id,
         )
 
         return booking
+
+
+    
