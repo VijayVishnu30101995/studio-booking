@@ -6,7 +6,6 @@ from apps.credits.views import (
     CreditTransactionListView,
 )
 
-
 urlpatterns = [
     path(
         "",

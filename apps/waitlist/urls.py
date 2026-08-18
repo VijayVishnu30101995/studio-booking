@@ -5,7 +5,6 @@ from apps.waitlist.views import (
     WaitlistView,
 )
 
-
 urlpatterns = [
     path(
         "classes/<int:pk>/waitlist/",

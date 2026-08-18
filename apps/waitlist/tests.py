@@ -2,7 +2,6 @@ from datetime import timedelta
 
 from django.test import TransactionTestCase
 from django.utils import timezone
-
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -20,6 +19,7 @@ from apps.waitlist.services import (
     ClassNotFullError,
     WaitlistService,
 )
+
 
 class WaitlistServiceTests(TransactionTestCase):
     def setUp(self) -> None:

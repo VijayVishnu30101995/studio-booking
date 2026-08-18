@@ -1,10 +1,9 @@
 from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
-from rest_framework.test import APITestCase,APIRequestFactory
+from rest_framework.test import APIRequestFactory, APITestCase
 
-from apps.accounts.permissions import IsMember, IsStaff
 from apps.accounts.models import UserRole
-
+from apps.accounts.permissions import IsMember, IsStaff
 
 User = get_user_model()
 

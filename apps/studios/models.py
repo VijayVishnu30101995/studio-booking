@@ -1,5 +1,6 @@
 from django.core.validators import MinValueValidator
 from django.db import models
+
 from apps.studios.validators import validate_iana_timezone
 
 

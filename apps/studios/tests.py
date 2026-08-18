@@ -1,7 +1,6 @@
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
-from django.contrib.auth import get_user_model
-
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -31,9 +30,8 @@ class IANATimezoneValidatorTests(SimpleTestCase):
         ]
 
         for timezone in invalid_timezones:
-            with self.subTest(timezone=timezone):
-                with self.assertRaises(ValidationError):
-                    validate_iana_timezone(timezone)
+            with self.subTest(timezone=timezone), self.assertRaises(ValidationError):
+                validate_iana_timezone(timezone)
 
 
 class StudioAPITests(APITestCase):

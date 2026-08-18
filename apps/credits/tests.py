@@ -2,25 +2,23 @@ from datetime import timedelta
 
 from django.test import TestCase
 from django.utils import timezone
-
-from apps.accounts.models import User
-from apps.bookings.models import Booking
-from apps.classes.models import FitnessClass
-from apps.studios.models import Studio
-from apps.credits.models import (
-    CreditTransaction,
-    CreditTransactionCause,
-
-)
-from apps.credits.services import (
-    CreditService, 
-    InsufficientCreditsError,
-    )
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.accounts.models import UserRole
-from apps.credits.models import CreditPack
+from apps.accounts.models import User, UserRole
+from apps.bookings.models import Booking
+from apps.classes.models import FitnessClass
+from apps.credits.models import (
+    CreditPack,
+    CreditTransaction,
+    CreditTransactionCause,
+)
+from apps.credits.services import (
+    CreditService,
+    InsufficientCreditsError,
+)
+from apps.studios.models import Studio
+
 
 class CreditServiceTests(TestCase):
     def setUp(self):
