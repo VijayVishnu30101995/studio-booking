@@ -17,5 +17,11 @@ venv/
 # macOS
 .DS_Store
 
+# Ruff
+.ruff_cache/
+
+# Mypy
+.mypy_cache/
+
 
 
