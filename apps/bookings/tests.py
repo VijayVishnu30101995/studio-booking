@@ -1036,3 +1036,380 @@ class BookingAPITests(APITestCase):
             response.status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+class CancellationAPITests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPassword123!"
+
+        self.member = User.objects.create_user(
+            username="cancel_api_member",
+            email="cancel_api_member@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.other_member = User.objects.create_user(
+            username="cancel_api_other",
+            email="cancel_api_other@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        CreditService.grant_pack(
+            member=self.other_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+)
+
+        self.staff = User.objects.create_user(
+            username="cancel_api_staff",
+            email="cancel_api_staff@example.com",
+            password=self.password,
+            role=UserRole.STAFF,
+        )
+
+        self.studio = Studio.objects.create(
+            name="Cancellation API Studio",
+            timezone="Asia/Kolkata",
+            cancellation_cutoff_hours=4,
+        )
+
+        self.fitness_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=2,
+            credit_cost=5,
+        )
+
+        CreditService.grant_pack(
+            member=self.member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+    def authenticate_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def create_booking(self):
+        return BookingService.book(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+            idempotency_key="cancel-api-booking",
+        )
+
+    def cancel_url(self, booking):
+        return f"/api/bookings/{booking.id}/cancel/"
+
+    def test_member_can_cancel_own_booking(self):
+        booking = self.create_booking()
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["id"],
+            booking.id,
+        )
+
+        self.assertEqual(
+            response.data["status"],
+            BookingStatus.CANCELLED,
+        )
+
+        booking.refresh_from_db()
+
+        self.assertEqual(
+            booking.status,
+            BookingStatus.CANCELLED,
+        )
+
+        self.assertIsNotNone(
+            booking.cancelled_at,
+        )
+
+    def test_cancellation_before_cutoff_refunds_credits(self):
+        booking = self.create_booking()
+
+        self.assertEqual(
+            CreditService.get_balance(member=self.member),
+            5,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=self.member),
+            10,
+        )
+
+        refund = CreditTransaction.objects.get(
+            member=self.member,
+            booking=booking,
+            cause=CreditTransactionCause.REFUND,
+        )
+
+        self.assertEqual(
+            refund.amount,
+            5,
+        )
+
+    def test_cancellation_after_cutoff_forfeits_credits(self):
+        late_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(hours=2),
+            duration_minutes=60,
+            spots=10,
+            credit_cost=5,
+        )
+
+        booking = BookingService.book(
+            member=self.member,
+            fitness_class_id=late_class.id,
+            idempotency_key="cancel-api-late",
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=self.member),
+            5,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=self.member),
+            5,
+        )
+
+        self.assertFalse(
+            CreditTransaction.objects.filter(
+                member=self.member,
+                booking=booking,
+                cause=CreditTransactionCause.REFUND,
+            ).exists()
+        )
+
+    def test_member_cannot_cancel_another_members_booking(self):
+        other_booking = BookingService.book(
+            member=self.other_member,
+            fitness_class_id=self.fitness_class.id,
+            idempotency_key="cancel-api-other",
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.cancel_url(other_booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        other_booking.refresh_from_db()
+
+        self.assertEqual(
+            other_booking.status,
+            BookingStatus.CONFIRMED,
+        )
+
+    def test_member_cannot_cancel_booking_twice(self):
+        booking = self.create_booking()
+
+        self.authenticate_as(self.member)
+
+        first_response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        second_response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        refund_count = CreditTransaction.objects.filter(
+            member=self.member,
+            booking=booking,
+            cause=CreditTransactionCause.REFUND,
+        ).count()
+
+        self.assertEqual(
+            refund_count,
+            1,
+        )
+
+    def test_unauthenticated_user_cannot_cancel_booking(self):
+        booking = self.create_booking()
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+        booking.refresh_from_db()
+
+        self.assertEqual(
+            booking.status,
+            BookingStatus.CONFIRMED,
+        )
+
+    def test_staff_cannot_cancel_booking(self):
+        booking = self.create_booking()
+
+        self.authenticate_as(self.staff)
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        booking.refresh_from_db()
+
+        self.assertEqual(
+            booking.status,
+            BookingStatus.CONFIRMED,
+        )
+
+    def test_cancel_nonexistent_booking_returns_not_found(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            "/api/bookings/999999/cancel/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_cancellation_promotes_waitlisted_member(self):
+        from apps.waitlist.models import WaitlistEntry
+        from apps.waitlist.services import WaitlistService
+
+        full_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        booking = BookingService.book(
+            member=self.member,
+            fitness_class_id=full_class.id,
+            idempotency_key="cancel-api-waitlist-booking",
+        )
+
+        waitlist_member = User.objects.create_user(
+            username="cancel_api_waitlist",
+            email="cancel_api_waitlist@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        CreditService.grant_pack(
+            member=waitlist_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        WaitlistService.join(
+            member=waitlist_member,
+            fitness_class_id=full_class.id,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.cancel_url(booking),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        promoted_booking = Booking.objects.get(
+            member=waitlist_member,
+            fitness_class=full_class,
+            status=BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            promoted_booking.credits_charged,
+            5,
+        )
+
+        self.assertFalse(
+            WaitlistEntry.objects.filter(
+                member=waitlist_member,
+                fitness_class=full_class,
+            ).exists()
+        )

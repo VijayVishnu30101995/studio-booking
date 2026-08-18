@@ -3,6 +3,7 @@ from django.urls import path
 from apps.bookings.views import (
     BookingCreateView,
     MyBookingListView,
+    CancellationView
 )
 
 
@@ -16,5 +17,10 @@ urlpatterns = [
         "me/bookings/",
         MyBookingListView.as_view(),
         name="my-bookings",
+    ),
+    path(
+        "bookings/<int:pk>/cancel/",
+        CancellationView.as_view(),
+        name="booking-cancel",
     ),
 ]
