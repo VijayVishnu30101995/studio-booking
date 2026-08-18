@@ -1,6 +1,9 @@
 from datetime import timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
+from rest_framework import status
+from rest_framework.test import APITestCase
 
+from apps.accounts.models import UserRole
 from concurrent.futures import ThreadPoolExecutor
 from django.db import close_old_connections
 from django.test import TransactionTestCase
@@ -601,4 +604,435 @@ class BookingServiceTests(TransactionTestCase):
         self.assertEqual(
             confirmed_booking_count,
             0,
+        )
+class BookingAPITests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPassword123!"
+
+        self.member = User.objects.create_user(
+            username="booking_api_member",
+            email="booking_api_member@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.other_member = User.objects.create_user(
+            username="booking_api_other",
+            email="booking_api_other@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.staff = User.objects.create_user(
+            username="booking_api_staff",
+            email="booking_api_staff@example.com",
+            password=self.password,
+            role=UserRole.STAFF,
+        )
+
+        self.studio = Studio.objects.create(
+            name="Booking API Studio",
+            timezone="Asia/Kolkata",
+            cancellation_cutoff_hours=4,
+        )
+
+        self.fitness_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=2,
+            credit_cost=5,
+        )
+
+        CreditService.grant_pack(
+            member=self.member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        CreditService.grant_pack(
+            member=self.other_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+    def authenticate_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def book_url(self):
+        return f"/api/classes/{self.fitness_class.id}/book/"
+
+    def test_member_can_book_class(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-001",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            response.data["member"],
+            self.member.id,
+        )
+
+        self.assertEqual(
+            response.data["fitness_class"],
+            self.fitness_class.id,
+        )
+
+        self.assertEqual(
+            response.data["credits_charged"],
+            5,
+        )
+
+        self.assertEqual(
+            response.data["status"],
+            BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            response.data["idempotency_key"],
+            "booking-api-001",
+        )
+
+        self.assertTrue(
+            Booking.objects.filter(
+                id=response.data["id"],
+                member=self.member,
+                fitness_class=self.fitness_class,
+                status=BookingStatus.CONFIRMED,
+            ).exists()
+        )
+
+    def test_booking_deducts_credits(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-002",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        balance = CreditService.get_balance(
+            member=self.member,
+        )
+
+        self.assertEqual(balance, 5)
+
+    def test_booking_requires_idempotency_key(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertFalse(
+            Booking.objects.filter(
+                member=self.member,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+    def test_same_idempotency_key_returns_existing_booking(self):
+        self.authenticate_as(self.member)
+
+        first_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-003",
+        )
+
+        second_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-003",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            first_response.data["id"],
+            second_response.data["id"],
+        )
+
+        self.assertEqual(
+            Booking.objects.filter(
+                member=self.member,
+                fitness_class=self.fitness_class,
+            ).count(),
+            1,
+        )
+
+    def test_member_cannot_book_same_class_twice(self):
+        self.authenticate_as(self.member)
+
+        first_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-004",
+        )
+
+        second_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-005",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            Booking.objects.filter(
+                member=self.member,
+                fitness_class=self.fitness_class,
+                status=BookingStatus.CONFIRMED,
+            ).count(),
+            1,
+        )
+
+    def test_booking_fails_when_class_is_full(self):
+        self.authenticate_as(self.member)
+
+        first_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-006",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.authenticate_as(self.other_member)
+
+        second_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-007",
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        third_member = User.objects.create_user(
+            username="booking_api_third",
+            email="booking_api_third@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        CreditService.grant_pack(
+            member=third_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        self.authenticate_as(third_member)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-008",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_booking_fails_with_insufficient_credits(self):
+        poor_member = User.objects.create_user(
+            username="booking_api_poor",
+            email="booking_api_poor@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.authenticate_as(poor_member)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-009",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertFalse(
+            Booking.objects.filter(
+                member=poor_member,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+    def test_unauthenticated_user_cannot_book(self):
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-010",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_staff_cannot_book_class(self):
+        self.authenticate_as(self.staff)
+
+        response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-011",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_member_can_list_own_bookings(self):
+        self.authenticate_as(self.member)
+
+        booking_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-012",
+        )
+
+        self.assertEqual(
+            booking_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        response = self.client.get(
+            "/api/me/bookings/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data),
+            1,
+        )
+
+        self.assertEqual(
+            response.data[0]["id"],
+            booking_response.data["id"],
+        )
+
+        self.assertEqual(
+            response.data[0]["member"],
+            self.member.id,
+        )
+
+    def test_member_cannot_see_another_members_bookings(self):
+        self.authenticate_as(self.other_member)
+
+        other_booking_response = self.client.post(
+            self.book_url(),
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="booking-api-013",
+        )
+
+        self.assertEqual(
+            other_booking_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.get(
+            "/api/me/bookings/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data),
+            0,
+        )
+
+    def test_unauthenticated_user_cannot_list_bookings(self):
+        response = self.client.get(
+            "/api/me/bookings/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_staff_cannot_list_member_bookings(self):
+        self.authenticate_as(self.staff)
+
+        response = self.client.get(
+            "/api/me/bookings/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
         )
