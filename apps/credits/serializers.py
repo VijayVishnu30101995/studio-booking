@@ -1,9 +1,6 @@
-from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from apps.credits.models import CreditPack
-
-User = get_user_model()
+from apps.credits.models import CreditPack, CreditTransaction
 
 
 class CreditPackSerializer(serializers.ModelSerializer):
@@ -48,3 +45,43 @@ class CreditPackSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class CreditBalancePackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CreditPack
+        fields = [
+            "id",
+            "credits_granted",
+            "grant_date",
+            "expiry_date",
+        ]
+        read_only_fields = fields
+
+
+class CreditBalanceSerializer(serializers.Serializer):
+    balance = serializers.IntegerField()
+    packs = CreditBalancePackSerializer(many=True)
+
+
+class CreditTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CreditTransaction
+        fields = [
+            "id",
+            "credit_pack",
+            "booking",
+            "amount",
+            "cause",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class CreditBalanceAtQuerySerializer(serializers.Serializer):
+    at = serializers.DateTimeField(required=True)
+
+
+class CreditBalanceAtSerializer(serializers.Serializer):
+    balance = serializers.IntegerField()
+    at = serializers.DateTimeField()
