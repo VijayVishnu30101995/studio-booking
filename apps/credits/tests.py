@@ -16,6 +16,11 @@ from apps.credits.services import (
     CreditService, 
     InsufficientCreditsError,
     )
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from apps.accounts.models import UserRole
+from apps.credits.models import CreditPack
 
 class CreditServiceTests(TestCase):
     def setUp(self):
@@ -472,3 +477,259 @@ class CreditServiceTests(TestCase):
 
         self.assertEqual(refunds.count(), 1)
         self.assertEqual(refunds[0].amount, 5)
+
+
+class CreditPackAPITests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPassword123!"
+
+        self.staff = User.objects.create_user(
+            username="credit_staff",
+            email="credit_staff@example.com",
+            password=self.password,
+            role=UserRole.STAFF,
+        )
+
+        self.member = User.objects.create_user(
+            username="credit_member",
+            email="credit_member@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.create_url = "/api/credit-packs/"
+
+    def authenticate_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_staff_can_grant_credit_pack(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            response.data["member"],
+            self.member.id,
+        )
+        self.assertEqual(
+            response.data["credits_granted"],
+            10,
+        )
+
+        self.assertTrue(
+            CreditPack.objects.filter(
+                member=self.member,
+                credits_granted=10,
+            ).exists()
+        )
+
+    def test_member_cannot_grant_credit_pack(self):
+        self.authenticate_as(self.member)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.assertFalse(
+            CreditPack.objects.filter(
+                member=self.member,
+            ).exists()
+        )
+
+    def test_unauthenticated_user_cannot_grant_credit_pack(self):
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_grant_creates_credit_transaction(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        pack = CreditPack.objects.get(
+            id=response.data["id"]
+        )
+
+        transaction = pack.transactions.get()
+
+        self.assertEqual(
+            transaction.amount,
+            10,
+        )
+        self.assertEqual(
+            transaction.cause,
+            CreditTransactionCause.GRANT,
+        )
+
+    def test_zero_credits_are_rejected(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 0,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_negative_credits_are_rejected(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": -5,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_expiry_date_before_grant_date_is_rejected(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date - timedelta(days=1)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_expiry_date_equal_to_grant_date_is_rejected(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": self.member.id,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": grant_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_nonexistent_member_is_rejected(self):
+        self.authenticate_as(self.staff)
+
+        grant_date = timezone.now()
+        expiry_date = grant_date + timedelta(days=30)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "member": 999999,
+                "credits": 10,
+                "grant_date": grant_date.isoformat(),
+                "expiry_date": expiry_date.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
