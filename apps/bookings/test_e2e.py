@@ -208,3 +208,236 @@ class BookingCancellationWaitlistE2ETests(TransactionTestCase):
             ).member,
             self.member_b,
         )
+    def test_cancellation_skips_unaffordable_waitlisted_member(
+        self,
+    ) -> None:
+        # ---------------------------------------------------------
+        # 1. Create two additional waitlisted members.
+        # ---------------------------------------------------------
+        member_c = User.objects.create_user(
+            username="e2e_member_c",
+            email="e2e_member_c@example.com",
+            password="password123",
+            role=UserRole.MEMBER,
+        )
+
+        member_d = User.objects.create_user(
+            username="e2e_member_d",
+            email="e2e_member_d@example.com",
+            password="password123",
+            role=UserRole.MEMBER,
+        )
+
+        # Member C intentionally has 0 credits.
+        self.assertEqual(
+            CreditService.get_balance(member=member_c),
+            0,
+        )
+
+        # Member D can afford the 5-credit class.
+        CreditService.grant_pack(
+            member=member_d,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        # ---------------------------------------------------------
+        # 2. Member A books the only available spot.
+        # ---------------------------------------------------------
+        original_booking = BookingService.book(
+            member=self.member_a,
+            fitness_class_id=self.fitness_class.id,
+            idempotency_key="e2e-unaffordable-member-a",
+        )
+
+        self.assertEqual(
+            original_booking.status,
+            BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=self.member_a),
+            5,
+        )
+
+        # ---------------------------------------------------------
+        # 3. Member C joins the waitlist first.
+        #    C is at the front but has no credits.
+        # ---------------------------------------------------------
+        first_waitlist_entry = WaitlistService.join(
+            member=member_c,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        self.assertEqual(
+            first_waitlist_entry.member,
+            member_c,
+        )
+
+        # ---------------------------------------------------------
+        # 4. Member D joins the waitlist second.
+        #    D has enough credits to be promoted.
+        # ---------------------------------------------------------
+        second_waitlist_entry = WaitlistService.join(
+            member=member_d,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        self.assertEqual(
+            second_waitlist_entry.member,
+            member_d,
+        )
+
+        # Verify both members are waiting.
+        self.assertTrue(
+            WaitlistEntry.objects.filter(
+                member=member_c,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+        self.assertTrue(
+            WaitlistEntry.objects.filter(
+                member=member_d,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+        # Neither member has been charged yet.
+        self.assertEqual(
+            CreditService.get_balance(member=member_c),
+            0,
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=member_d),
+            10,
+        )
+
+        # ---------------------------------------------------------
+        # 5. Member A cancels before the cutoff.
+        # ---------------------------------------------------------
+        cancelled_booking = CancellationService.cancel(
+            booking_id=original_booking.id,
+        )
+
+        self.assertEqual(
+            cancelled_booking.status,
+            BookingStatus.CANCELLED,
+        )
+
+        # Member A receives the refund.
+        self.assertEqual(
+            CreditService.get_balance(member=self.member_a),
+            10,
+        )
+
+        refund_transaction = CreditTransaction.objects.get(
+            member=self.member_a,
+            booking=original_booking,
+            cause=CreditTransactionCause.REFUND,
+        )
+
+        self.assertEqual(
+            refund_transaction.amount,
+            5,
+        )
+
+        # ---------------------------------------------------------
+        # 6. Member C cannot afford the class.
+        #    C must remain on the waitlist.
+        # ---------------------------------------------------------
+        self.assertTrue(
+            WaitlistEntry.objects.filter(
+                member=member_c,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+        self.assertEqual(
+            CreditService.get_balance(member=member_c),
+            0,
+        )
+
+        self.assertFalse(
+            Booking.objects.filter(
+                member=member_c,
+                fitness_class=self.fitness_class,
+                status=BookingStatus.CONFIRMED,
+            ).exists()
+        )
+
+        # ---------------------------------------------------------
+        # 7. Member D should be promoted.
+        # ---------------------------------------------------------
+        promoted_booking = Booking.objects.get(
+            member=member_d,
+            fitness_class=self.fitness_class,
+            status=BookingStatus.CONFIRMED,
+        )
+
+        self.assertEqual(
+            promoted_booking.credits_charged,
+            5,
+        )
+
+        # ---------------------------------------------------------
+        # 8. Member D should be charged 5 credits.
+        # ---------------------------------------------------------
+        self.assertEqual(
+            CreditService.get_balance(member=member_d),
+            5,
+        )
+
+        booking_transaction = CreditTransaction.objects.get(
+            member=member_d,
+            booking=promoted_booking,
+            cause=CreditTransactionCause.BOOKING,
+        )
+
+        self.assertEqual(
+            booking_transaction.amount,
+            -5,
+        )
+
+        # ---------------------------------------------------------
+        # 9. Member D should leave the waitlist.
+        # ---------------------------------------------------------
+        self.assertFalse(
+            WaitlistEntry.objects.filter(
+                member=member_d,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+        # Member C must remain at the front of the waitlist.
+        remaining_entry = WaitlistEntry.objects.get(
+            fitness_class=self.fitness_class,
+        )
+
+        self.assertEqual(
+            remaining_entry.member,
+            member_c,
+        )
+
+        # ---------------------------------------------------------
+        # 10. The class should have exactly one confirmed booking.
+        # ---------------------------------------------------------
+        confirmed_booking_count = Booking.objects.filter(
+            fitness_class=self.fitness_class,
+            status=BookingStatus.CONFIRMED,
+        ).count()
+
+        self.assertEqual(
+            confirmed_booking_count,
+            1,
+        )
+
+        self.assertEqual(
+            Booking.objects.get(
+                fitness_class=self.fitness_class,
+                status=BookingStatus.CONFIRMED,
+            ).member,
+            member_d,
+        )
