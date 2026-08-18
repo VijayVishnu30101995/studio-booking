@@ -6,6 +6,8 @@ from apps.bookings.models import Booking
 from apps.bookings.serializers import BookingSerializer
 from apps.bookings.services import (
     BookingService,
+    CancellationService,
+    BookingAlreadyCancelledError,
     ClassFullError,
     DuplicateBookingError,
 )
@@ -74,4 +76,44 @@ class MyBookingListView(generics.ListAPIView):
             .filter(member=self.request.user)
             .select_related("fitness_class")
             .order_by("-created_at")
+        )
+
+class CancellationView(generics.GenericAPIView):
+    serializer_class = BookingSerializer
+    permission_classes = [IsMember]
+
+    def post(self, request, pk):
+        try:
+            booking = (
+                Booking.objects
+                .select_related("fitness_class")
+                .get(pk=pk)
+            )
+        except Booking.DoesNotExist:
+            return Response(
+                {"detail": "Booking not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if booking.member_id != request.user.id:
+            return Response(
+                {"detail": "You can only cancel your own bookings."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            cancelled_booking = CancellationService.cancel(
+                booking_id=booking.id,
+            )
+        except BookingAlreadyCancelledError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(cancelled_booking)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
         )
