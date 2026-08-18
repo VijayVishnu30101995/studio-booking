@@ -25,5 +25,6 @@ urlpatterns = [
     path("api/credit-packs/", include("apps.credits.urls")),
     path("api/credits/", include("apps.credits.api_urls")),
     path("api/", include("apps.bookings.urls")),
+    path("api/", include("apps.waitlist.urls")),
     
 ]

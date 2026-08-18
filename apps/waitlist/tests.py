@@ -3,7 +3,10 @@ from datetime import timedelta
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-from apps.accounts.models import User
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from apps.accounts.models import User, UserRole
 from apps.bookings.models import Booking, BookingStatus
 from apps.bookings.services import BookingService
 from apps.classes.models import FitnessClass
@@ -17,7 +20,6 @@ from apps.waitlist.services import (
     ClassNotFullError,
     WaitlistService,
 )
-
 
 class WaitlistServiceTests(TransactionTestCase):
     def setUp(self) -> None:
@@ -324,4 +326,335 @@ class WaitlistServiceTests(TransactionTestCase):
             ).exists()
         )
 
-# Create your tests here.
+class WaitlistAPITests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPassword123!"
+
+        self.member = User.objects.create_user(
+            username="waitlist_api_member",
+            email="waitlist_api_member@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.other_member = User.objects.create_user(
+            username="waitlist_api_other",
+            email="waitlist_api_other@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.staff = User.objects.create_user(
+            username="waitlist_api_staff",
+            email="waitlist_api_staff@example.com",
+            password=self.password,
+            role=UserRole.STAFF,
+        )
+
+        self.studio = Studio.objects.create(
+            name="Waitlist API Studio",
+            timezone="Asia/Kolkata",
+            cancellation_cutoff_hours=4,
+        )
+
+        self.fitness_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=1),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+    def authenticate_as(self, user):
+        self.client.force_authenticate(user=user)
+
+    def join_url(self):
+        return f"/api/classes/{self.fitness_class.id}/waitlist/"
+
+    def leave_url(self):
+        return f"/api/classes/{self.fitness_class.id}/waitlist/"
+
+    def list_url(self):
+        return "/api/me/waitlist/"
+
+    def create_full_class_booking(self):
+        CreditService.grant_pack(
+            member=self.other_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        return BookingService.book(
+            member=self.other_member,
+            fitness_class_id=self.fitness_class.id,
+            idempotency_key="waitlist-api-full-class",
+        )
+
+    def test_member_can_join_full_class_waitlist(self):
+        self.create_full_class_booking()
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            response.data["member"],
+            self.member.id,
+        )
+
+        self.assertEqual(
+            response.data["fitness_class"],
+            self.fitness_class.id,
+        )
+
+        self.assertTrue(
+            WaitlistEntry.objects.filter(
+                member=self.member,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+    def test_member_cannot_join_waitlist_when_class_has_space(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_member_cannot_join_waitlist_twice(self):
+        self.create_full_class_booking()
+
+        WaitlistService.join(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_member_with_confirmed_booking_cannot_join_waitlist(self):
+        CreditService.grant_pack(
+            member=self.member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        BookingService.book(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+            idempotency_key="waitlist-api-already-booked",
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_member_can_leave_waitlist(self):
+        self.create_full_class_booking()
+
+        WaitlistService.join(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.delete(
+            self.leave_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+
+        self.assertFalse(
+            WaitlistEntry.objects.filter(
+                member=self.member,
+                fitness_class=self.fitness_class,
+            ).exists()
+        )
+
+    def test_leave_waitlist_is_safe_when_entry_does_not_exist(self):
+        self.authenticate_as(self.member)
+
+        response = self.client.delete(
+            self.leave_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+
+    def test_member_can_list_own_waitlist_entries(self):
+        self.create_full_class_booking()
+
+        WaitlistService.join(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        self.authenticate_as(self.member)
+
+        response = self.client.get(
+            self.list_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data),
+            1,
+        )
+
+        self.assertEqual(
+            response.data[0]["member"],
+            self.member.id,
+        )
+
+        self.assertEqual(
+            response.data[0]["fitness_class"],
+            self.fitness_class.id,
+        )
+
+    def test_member_can_only_see_own_waitlist_entries(self):
+        self.create_full_class_booking()
+
+        WaitlistService.join(
+            member=self.member,
+            fitness_class_id=self.fitness_class.id,
+        )
+
+        another_class = FitnessClass.objects.create(
+            studio=self.studio,
+            start_time=timezone.now() + timedelta(days=2),
+            duration_minutes=60,
+            spots=1,
+            credit_cost=5,
+        )
+
+        CreditService.grant_pack(
+            member=self.other_member,
+            credits=10,
+            grant_date=timezone.now(),
+            expiry_date=timezone.now() + timedelta(days=30),
+        )
+
+        BookingService.book(
+            member=self.other_member,
+            fitness_class_id=another_class.id,
+            idempotency_key="waitlist-api-another-class",
+        )
+
+        WaitlistService.join(
+            member=self.member,
+            fitness_class_id=another_class.id,
+        )
+
+        self.authenticate_as(self.other_member)
+
+        response = self.client.get(
+            self.list_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            len(response.data),
+            0,
+        )
+    def test_unauthenticated_user_cannot_join_waitlist(self):
+        self.create_full_class_booking()
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_unauthenticated_user_cannot_list_waitlist(self):
+        response = self.client.get(
+            self.list_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_staff_cannot_join_waitlist(self):
+        self.create_full_class_booking()
+
+        self.authenticate_as(self.staff)
+
+        response = self.client.post(
+            self.join_url(),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_staff_cannot_list_waitlist(self):
+        self.authenticate_as(self.staff)
+
+        response = self.client.get(
+            self.list_url(),
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
