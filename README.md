@@ -25,7 +25,7 @@ The system supports:
 
 ## 1. Technology Stack
 
-- Python 3.10
+- Python 3.13
 - Django 5.2.5
 - Django REST Framework 3.16.1
 - PostgreSQL 16
@@ -35,7 +35,7 @@ The system supports:
 - mypy / django-stubs available as development dependencies
 - GitHub Actions
 
-The current development and Docker environment uses Python 3.10.
+The current development and Docker environment uses Python 3.13.
 
 ---
 
