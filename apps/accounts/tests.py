@@ -25,7 +25,7 @@ class LoginAPITests(APITestCase):
         response = self.client.post(
             self.url,
             {
-                "username": "member1",
+                "identifier": "member1",
                 "password": self.password,
             },
             format="json",
@@ -128,4 +128,50 @@ class RolePermissionTests(APITestCase):
             permission.has_permission(request, None)
         )
 
-# Create your tests here.
+class LogoutAPITests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPassword123!"
+
+        self.user = User.objects.create_user(
+            username="logoutuser",
+            email="logout@example.com",
+            password=self.password,
+            role=UserRole.MEMBER,
+        )
+
+        self.token = Token.objects.create(user=self.user)
+        self.url = "/api/auth/logout/"
+
+    def test_authenticated_user_can_logout(self):
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Token {self.token.key}"
+        )
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(
+            Token.objects.filter(user=self.user).exists()
+        )
+
+    def test_logout_requires_authentication(self):
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_old_token_cannot_be_used_after_logout(self):
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Token {self.token.key}"
+        )
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 204)
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Token {self.token.key}"
+        )
+
+        response = self.client.get("/api/credits/")
+
+        self.assertEqual(response.status_code, 401)
