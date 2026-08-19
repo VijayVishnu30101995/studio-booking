@@ -2,7 +2,6 @@ from django.urls import path
 
 from apps.credits.views import CreditPackCreateView
 
-
 urlpatterns = [
     path(
         "",

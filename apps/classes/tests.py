@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -8,9 +9,6 @@ from apps.accounts.models import UserRole
 from apps.bookings.models import Booking, BookingStatus
 from apps.classes.models import FitnessClass
 from apps.studios.models import Studio
-
-from django.contrib.auth import get_user_model
-
 
 User = get_user_model()
 

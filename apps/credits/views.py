@@ -8,7 +8,6 @@ from apps.credits.serializers import (
     CreditBalanceAtQuerySerializer,
     CreditBalanceAtSerializer,
     CreditBalanceSerializer,
-    CreditBalancePackSerializer,
     CreditPackSerializer,
     CreditTransactionSerializer,
 )

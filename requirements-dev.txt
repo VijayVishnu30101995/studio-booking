@@ -1,0 +1,8 @@
+-r requirements.txt
+
+ruff==0.16.3
+mypy==2.3.1
+django-stubs==6.0.9
+django-stubs-ext==6.0.9
+djangorestframework-stubs==3.18.0
+types-PyYAML==6.0.12.20260815

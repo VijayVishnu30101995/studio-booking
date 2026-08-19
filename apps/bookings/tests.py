@@ -1,15 +1,15 @@
-from datetime import timedelta, timezone as dt_timezone
-from zoneinfo import ZoneInfo
-from rest_framework import status
-from rest_framework.test import APITestCase
-
-from apps.accounts.models import UserRole
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from datetime import timezone as dt_timezone
+from zoneinfo import ZoneInfo
+
 from django.db import close_old_connections
 from django.test import TransactionTestCase
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
 
-from apps.accounts.models import User
+from apps.accounts.models import User, UserRole
 from apps.bookings.models import Booking, BookingStatus
 from apps.bookings.services import (
     BookingAlreadyCancelledError,
@@ -25,6 +25,7 @@ from apps.credits.services import (
     InsufficientCreditsError,
 )
 from apps.studios.models import Studio
+
 
 class BookingServiceTests(TransactionTestCase):
     def setUp(self) -> None:

@@ -9,4 +9,4 @@ def validate_iana_timezone(value: str) -> None:
     except ZoneInfoNotFoundError:
         raise ValidationError(
             "Enter a valid IANA timezone."
-        )
+        ) from None
