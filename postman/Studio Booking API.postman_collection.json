@@ -1,0 +1,941 @@
+{
+	"info": {
+		"_postman_id": "4d9bdf6f-41b8-4474-ac6f-627e8f0d6e1d",
+		"name": "Studio Booking API",
+		"description": "Complete Postman collection for the Studio Booking Django REST Framework backend. Covers authentication, studios, classes, credit packs, credits, bookings, cancellation, and waitlist flows.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "29636566"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login - Staff",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"const responseData = pm.response.json();",
+									"",
+									"pm.test(\"Response contains token\", function () {",
+									"    pm.expect(responseData).to.have.property(\"token\");",
+									"});",
+									"",
+									"pm.test(\"Response contains user\", function () {",
+									"    pm.expect(responseData).to.have.property(\"user\");",
+									"});",
+									"",
+									"pm.collectionVariables.set(\"staff_token\", responseData.token);",
+									"pm.collectionVariables.set(\"auth_token\", responseData.token);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"identifier\": \"{{staff_username}}\",\n  \"password\": \"{{staff_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Login - Member",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"const responseData = pm.response.json();",
+									"",
+									"pm.test(\"Response contains token\", function () {",
+									"    pm.expect(responseData).to.have.property(\"token\");",
+									"});",
+									"",
+									"pm.collectionVariables.set(",
+									"    \"member_token\",",
+									"    responseData.token",
+									");",
+									"",
+									"pm.collectionVariables.set(",
+									"    \"auth_token\",",
+									"    responseData.token",
+									");"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"identifier\": \"member2\",\n  \"password\": \"{{member_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Studios",
+			"item": [
+				{
+					"name": "Create Studio",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"const responseData = pm.response.json();",
+									"",
+									"pm.test(\"Studio has an ID\", function () {",
+									"    pm.expect(responseData).to.have.property(\"id\");",
+									"});",
+									"",
+									"if (responseData.id) {",
+									"    pm.collectionVariables.set(",
+									"        \"studio_id\",",
+									"        responseData.id.toString()",
+									"    );",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{staff_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Downtown Fitness Studio\",\n  \"timezone\": \"Asia/Kolkata\",\n  \"cancellation_cutoff_hours\": 4\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/studios/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"studios",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Studio",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{staff_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/studios/{{studio_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"studios",
+								"{{studio_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Studio",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{staff_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Downtown Fitness Studio\",\n  \"cancellation_cutoff_hours\": 4\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/studios/{{studio_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"studios",
+								"{{studio_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Classes",
+			"item": [
+				{
+					"name": "List Classes",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/classes/?start_date={{start_date}}&end_date={{end_date}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								""
+							],
+							"query": [
+								{
+									"key": "start_date",
+									"value": "{{start_date}}"
+								},
+								{
+									"key": "end_date",
+									"value": "{{end_date}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Class",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"const responseData = pm.response.json();",
+									"",
+									"pm.test(\"Class has an ID\", function () {",
+									"    pm.expect(responseData).to.have.property(\"id\");",
+									"});",
+									"",
+									"if (responseData.id) {",
+									"    pm.collectionVariables.set(",
+									"        \"class_id\",",
+									"        responseData.id.toString()",
+									"    );",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{staff_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"studio\": \"{{studio_id}}\",\n  \"start_time\": \"2026-08-25T10:00:00Z\",\n  \"duration_minutes\": 60,\n  \"spots\": 10,\n  \"credit_cost\": 5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/classes/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Class",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/classes/{{class_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								"{{class_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Credit Packs",
+			"item": [
+				{
+					"name": "Grant Credit Pack",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 201', () => pm.response.to.have.status(201));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{staff_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"member\": \"3\",\n  \"credits\": 40,\n  \"grant_date\": \"2026-08-19T10:00:00Z\",\n  \"expiry_date\": \"2026-09-19T10:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/credit-packs/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"credit-packs",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Credits",
+			"item": [
+				{
+					"name": "Get Current Credits",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/credits/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"credits",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Credit Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/credits/transactions/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"credits",
+								"transactions",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Historical Balance",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/credits/balance-at/?at={{balance_at}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"credits",
+								"balance-at",
+								""
+							],
+							"query": [
+								{
+									"key": "at",
+									"value": "{{balance_at}}"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Bookings",
+			"item": [
+				{
+					"name": "Book Class",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Duplicate booking is rejected\", function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([400, 409]);",
+									"});",
+									"",
+									"const responseData = pm.response.json();",
+									"",
+									"pm.test(\"Error response is returned\", function () {",
+									"    pm.expect(responseData).to.exist;",
+									"});"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Idempotency-Key",
+								"value": "{{idempotency_key}}"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/classes/{{class_id}}/book/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								"{{class_id}}",
+								"book",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List My Bookings",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/me/bookings",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"me",
+								"bookings"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Cancellation",
+			"item": [
+				{
+					"name": "Cancel Booking",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/bookings/8/cancel/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"bookings",
+								"8",
+								"cancel",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Waitlist",
+			"item": [
+				{
+					"name": "Join Waitlist",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 201', () => pm.response.to.have.status(201));",
+									"const data = pm.response.json();",
+									"if (data.id) pm.collectionVariables.set('waitlist_entry_id', data.id.toString());"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/classes/{{waitlist_class_id}}/waitlist",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								"{{waitlist_class_id}}",
+								"waitlist"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List My Waitlist",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200', () => pm.response.to.have.status(200));"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/me/waitlist/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"me",
+								"waitlist",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Leave Waitlist",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status is 204', () => pm.response.to.have.status(204));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{member_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/classes/{{waitlist_class_id}}/waitlist",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"classes",
+								"{{waitlist_class_id}}",
+								"waitlist"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"pm.request.headers.upsert({ key: 'Accept', value: 'application/json' });"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://127.0.0.1:8000",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "staff_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "member_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "staff_username",
+			"value": "staff",
+			"type": "string"
+		},
+		{
+			"key": "staff_password",
+			"value": "password",
+			"type": "string"
+		},
+		{
+			"key": "member_username",
+			"value": "member",
+			"type": "string"
+		},
+		{
+			"key": "member_password",
+			"value": "password",
+			"type": "string"
+		},
+		{
+			"key": "studio_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "class_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "booking_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "waitlist_class_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "credit_pack_member_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "waitlist_entry_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "idempotency_key",
+			"value": "{{$guid}}",
+			"type": "string"
+		},
+		{
+			"key": "balance_at",
+			"value": "2026-08-19T10:00:00Z",
+			"type": "string"
+		},
+		{
+			"key": "start_date",
+			"value": "2026-08-01",
+			"type": "string"
+		},
+		{
+			"key": "end_date",
+			"value": "2026-08-31",
+			"type": "string"
+		}
+	]
+}
