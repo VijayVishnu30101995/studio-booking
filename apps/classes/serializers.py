@@ -6,12 +6,14 @@ from apps.classes.models import FitnessClass
 
 class FitnessClassSerializer(serializers.ModelSerializer):
     available_spots = serializers.SerializerMethodField()
+    studio_name = serializers.CharField(source="studio.name", read_only=True)
 
     class Meta:
         model = FitnessClass
         fields = [
             "id",
             "studio",
+            "studio_name",
             "start_time",
             "duration_minutes",
             "spots",

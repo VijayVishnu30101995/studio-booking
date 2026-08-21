@@ -5,24 +5,34 @@ from apps.accounts.models import User
 
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    identifier = serializers.CharField()
     password = serializers.CharField(
         write_only=True,
         trim_whitespace=False,
     )
 
     def validate(self, attrs):
-        username = attrs["username"]
+        identifier = attrs["identifier"]
         password = attrs["password"]
 
+        user = User.objects.filter(username=identifier).first()
+
+        if user is None:
+            user = User.objects.filter(email__iexact=identifier).first()
+
+        if user is None:
+            raise serializers.ValidationError(
+                "Invalid username/email or password."
+            )
+
         user = authenticate(
-            username=username,
+            username=user.username,
             password=password,
         )
 
         if user is None:
             raise serializers.ValidationError(
-                "Invalid username or password."
+                "Invalid username/email or password."
             )
 
         if not user.is_active:

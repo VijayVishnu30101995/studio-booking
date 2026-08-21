@@ -8,12 +8,14 @@ class CreditPackSerializer(serializers.ModelSerializer):
         write_only=True,
         min_value=1,
     )
+    member_name = serializers.CharField(source="member.username", read_only=True)
 
     class Meta:
         model = CreditPack
         fields = [
             "id",
-            "member",
+            "member",   
+            "member_name",
             "credits",
             "credits_granted",
             "grant_date",
@@ -22,6 +24,7 @@ class CreditPackSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "member_name",
             "credits_granted",
             "created_at",
         ]
